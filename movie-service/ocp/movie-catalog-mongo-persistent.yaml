@@ -1,0 +1,178 @@
+apiVersion: v1
+kind: Template
+labels:
+  app: redblue-cinema-catalog
+metadata:
+  annotations:
+    description: RedBlue online cinema catalog persistent template for MongoDB
+  name: redblue-cinema-catalog-mongodb
+objects:
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      labels:
+        app: redblue-cinema-movie-catalog-service
+      name: movie-catalog-mongodb
+    spec:
+      ports:
+        - name: mongo
+          port: 27017
+          protocol: TCP
+          targetPort: 27017
+      selector:
+        deploymentconfig: movie-catalog-mongodb
+      sessionAffinity: None
+      type: ClusterIP
+  - apiVersion: v1
+    kind: DeploymentConfig
+    metadata:
+      labels:
+        app: redblue-cinema-movie-catalog-service
+      name: movie-catalog-mongodb
+    spec:
+      replicas: 1
+      selector:
+        deploymentconfig: movie-catalog-mongodb
+      strategy:
+        recreateParams:
+          post:
+            execNewPod:
+              command:
+                - /bin/sh
+                - -i
+                - -c
+                - sleep 10 && /opt/rh/rh-mongodb32/root/usr/bin/mongo $MOVIE_CATALOG_MONGODB_SERVICE_HOST:27017/$MONGODB_DATABASE -u $MONGODB_USER -p $MONGODB_PASSWORD
+                  --eval="$MONGODB_INIT"
+              containerName: movie-catalog-mongodb
+              env:
+                - name: MONGODB_INIT
+                  value: db.movies.insert({"_id":"11111","movieId":"11111","name":"The Godfather","release":"1972",
+                    "director":"Francis Ford Coppola","actors":"Marlon Brando, Al Pacino","genre":"drama"});
+                    db.movies.insert({"_id":"22222","movieId":"22222","name":"Wall Street","release":"1987",
+                    "director":"Oliver Stone","actors":"Michael Douglas, Charlie Sheen","genre":"drama"});
+                    db.movies.insert({"_id":"33333","movieId":"33333","name":"Some Like It Hot","release":"1959",
+                    "director":"Billy Wilder","actors":"Marilyn Monroe, Tony Curtis, Jack Lemmon","genre":"comedy"});
+                    db.movies.insert({"_id":"44444","movieId":"44444","name":"Tootsie","release":"1982",
+                    "director":"Sydney Pollack","actors":"Dustin Hoffman, Jessica Lange","genre":"comedy"});
+                    db.movies.insert({"_id":"55555","movieId":"55555","name":"The Terminator","release":"1984",
+                    "director":"James Cameron","actors":"Arnold Schwarzenegger, Linda Hamilton, Michael Biehn","genre":"action"});
+                    db.movies.insert({"_id":"66666","movieId":"66666","name":"The Terminator 2 - Judgment Day","release":"1991",
+                    "director":"James Cameron","actors":"Arnold Schwarzenegger, Linda Hamilton, Edward Furlong","genre":"action"});
+                    db.movies.insert({"_id":"77777","movieId":"77777","name":"Inception","release":"2010",
+                    "director":"Christopher Nolan","actors":"Leonardo DiCaprio, Tom Hardy, Michael Caine","genre":"action"});
+                    db.movies.insert({"_id":"88888","movieId":"88888","name":"The Departed","release":"2006",
+                    "director":"Martin Scorsese","actors":"Leonardo DiCaprio, Matt Damon, Jack Nicholson","genre":"drama"});
+                    db.movies.insert({"_id":"99999","movieId":"99999","name":"The Godfather - Part II","release":"1974",
+                    "director":"Francis Ford Coppola","actors":"Al Pacino, Robert De Niro, Robert Duvall","genre":"drama"});
+            failurePolicy: ignore
+          timeoutSeconds: 600
+        resources: {}
+        type: Recreate
+      template:
+        metadata:
+          labels:
+            app: redblue-cinema-movie-catalog-service
+            deploymentconfig: movie-catalog-mongodb
+        spec:
+          containers:
+            - env:
+                - name: KUBERNETES_NAMESPACE
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.namespace
+                - name: MONGODB_USER
+                  value: ${CATALOG_DB_USERNAME}
+                - name: MONGODB_PASSWORD
+                  value: ${CATALOG_DB_PASSWORD}
+                - name: MONGODB_DATABASE
+                  value: ${CATALOG_DATABASE}
+                - name: MONGODB_ADMIN_PASSWORD
+                  value: ${CATALOG_DB_PASSWORD}
+              image: mongodb
+              imagePullPolicy: IfNotPresent
+              livenessProbe:
+                failureThreshold: 10
+                initialDelaySeconds: 30
+                periodSeconds: 10
+                successThreshold: 1
+                tcpSocket:
+                  port: 27017
+                timeoutSeconds: 1
+              name: movie-catalog-mongodb
+              ports:
+                - containerPort: 27017
+                  protocol: TCP
+              readinessProbe:
+                exec:
+                  command:
+                    - /bin/sh
+                    - -i
+                    - -c
+                    - mongo 127.0.0.1:27017/$MONGODB_DATABASE -u $MONGODB_USER -p $MONGODB_PASSWORD
+                      --eval="quit()"
+                failureThreshold: 10
+                initialDelaySeconds: 5
+                periodSeconds: 10
+                successThreshold: 1
+                timeoutSeconds: 1
+              resources:
+                limits:
+                  cpu: 500m
+                  memory: 1Gi
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+              securityContext:
+                capabilities: {}
+                privileged: false
+              terminationMessagePath: /dev/termination-log
+              volumeMounts:
+                - mountPath: /var/lib/mongodb/data
+                  name: mongodb-data
+          dnsPolicy: ClusterFirst
+          restartPolicy: Always
+          securityContext: {}
+          terminationGracePeriodSeconds: 30
+          volumes:
+            - name: mongodb-data
+              persistentVolumeClaim:
+                claimName: mongodb-data-pv
+      test: false
+      triggers:
+        - imageChangeParams:
+            automatic: true
+            containerNames:
+              - movie-catalog-mongodb
+            from:
+              kind: ImageStreamTag
+              name: mongodb:3.2
+              namespace: openshift
+          type: ImageChange
+        - type: ConfigChange
+  - apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata:
+      labels:
+        application: movie-catalog-mongodb
+      name: mongodb-data-pv
+    spec:
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 1Gi
+parameters:
+  - description: Catalog Service database user name
+    from: user[a-zA-Z0-9]{3}
+    generate: expression
+    name: CATALOG_DB_USERNAME
+    required: true
+  - description: Catalog Service database user password
+    from: '[a-zA-Z0-9]{8}'
+    generate: expression
+    name: CATALOG_DB_PASSWORD
+    required: true
+  - description: Catalog Service database name
+    name: CATALOG_DATABASE
+    required: true
+    value: moviecatalogdb

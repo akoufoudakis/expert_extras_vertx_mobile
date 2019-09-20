@@ -1,0 +1,162 @@
+apiVersion: v1
+kind: Template
+labels:
+  app: redblue-cinema-users
+metadata:
+  annotations:
+    description: RedBlue online cinema catalog persistent template for MongoDB
+  name: redblue-cinema-users-mongodb
+objects:
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      labels:
+        app: redblue-cinema-users-service
+      name: users-mongodb
+    spec:
+      ports:
+        - name: mongo
+          port: 27017
+          protocol: TCP
+          targetPort: 27017
+      selector:
+        deploymentconfig: users-mongodb
+      sessionAffinity: None
+      type: ClusterIP
+  - apiVersion: v1
+    kind: DeploymentConfig
+    metadata:
+      labels:
+        app: redblue-cinema-users-service
+      name: users-mongodb
+    spec:
+      replicas: 1
+      selector:
+        deploymentconfig: users-mongodb
+      strategy:
+        recreateParams:
+          post:
+            execNewPod:
+              command:
+                - /bin/sh
+                - -i
+                - -c
+                - sleep 10 && /opt/rh/rh-mongodb32/root/usr/bin/mongo $USERS_MONGODB_SERVICE_HOST:27017/$MONGODB_DATABASE -u $MONGODB_USER -p $MONGODB_PASSWORD
+                  --eval="$MONGODB_INIT"
+              containerName: users-mongodb
+              env:
+                - name: MONGODB_INIT
+                  value: db.users.insert({"_id":"11111","userId":"jdoe","name":"John Doe","subscription":"cinephile",
+                    "preferences":"drama,crime","watchlist":"The Departed,The Terminator 2 - Judgment Day"});
+            failurePolicy: ignore
+          timeoutSeconds: 600
+        resources: {}
+        type: Recreate
+      template:
+        metadata:
+          labels:
+            app: redblue-cinema-users-service
+            deploymentconfig: users-mongodb
+        spec:
+          containers:
+            - env:
+                - name: KUBERNETES_NAMESPACE
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.namespace
+                - name: MONGODB_USER
+                  value: ${CATALOG_DB_USERNAME}
+                - name: MONGODB_PASSWORD
+                  value: ${CATALOG_DB_PASSWORD}
+                - name: MONGODB_DATABASE
+                  value: ${CATALOG_DATABASE}
+                - name: MONGODB_ADMIN_PASSWORD
+                  value: ${CATALOG_DB_PASSWORD}
+              image: mongodb
+              imagePullPolicy: IfNotPresent
+              livenessProbe:
+                failureThreshold: 10
+                initialDelaySeconds: 30
+                periodSeconds: 10
+                successThreshold: 1
+                tcpSocket:
+                  port: 27017
+                timeoutSeconds: 1
+              name: users-mongodb
+              ports:
+                - containerPort: 27017
+                  protocol: TCP
+              readinessProbe:
+                exec:
+                  command:
+                    - /bin/sh
+                    - -i
+                    - -c
+                    - mongo 127.0.0.1:27017/$MONGODB_DATABASE -u $MONGODB_USER -p $MONGODB_PASSWORD
+                      --eval="quit()"
+                failureThreshold: 10
+                initialDelaySeconds: 5
+                periodSeconds: 10
+                successThreshold: 1
+                timeoutSeconds: 1
+              resources:
+                limits:
+                  cpu: 500m
+                  memory: 1Gi
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+              securityContext:
+                capabilities: {}
+                privileged: false
+              terminationMessagePath: /dev/termination-log
+              volumeMounts:
+                - mountPath: /var/lib/mongodb/data
+                  name: mongodb-data
+          dnsPolicy: ClusterFirst
+          restartPolicy: Always
+          securityContext: {}
+          terminationGracePeriodSeconds: 30
+          volumes:
+            - name: mongodb-data
+              persistentVolumeClaim:
+                claimName: users-mongodb-data-pv
+      test: false
+      triggers:
+        - imageChangeParams:
+            automatic: true
+            containerNames:
+              - users-mongodb
+            from:
+              kind: ImageStreamTag
+              name: mongodb:3.2
+              namespace: openshift
+          type: ImageChange
+        - type: ConfigChange
+  - apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata:
+      labels:
+        application: users-mongodb
+      name: users-mongodb-data-pv
+    spec:
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 1Gi
+parameters:
+  - description: Catalog Service database user name
+    from: user[a-zA-Z0-9]{3}
+    generate: expression
+    name: CATALOG_DB_USERNAME
+    required: true
+  - description: Catalog Service database user password
+    from: '[a-zA-Z0-9]{8}'
+    generate: expression
+    name: CATALOG_DB_PASSWORD
+    required: true
+  - description: Catalog Service database name
+    name: CATALOG_DATABASE
+    required: true
+    value: usersdb

@@ -1,0 +1,4 @@
+connection_string: mongodb://movie-catalog-mongodb:27017
+db_name: moviecatalogdb
+username: mongo
+password: mongo

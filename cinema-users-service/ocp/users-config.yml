@@ -1,0 +1,5 @@
+connection_string: mongodb://users-mongodb:27017
+db_name: usersdb
+username: mongo
+password: mongo
+eventbus.users: users
